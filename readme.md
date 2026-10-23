@@ -1,67 +1,133 @@
 # Wild Rice Leaf Disease Diagnosis
 
-This project aims to build and validate a computer vision pipeline for wild rice leaf images. The intended outputs are disease predictions, leaf and lesion masks, visible symptom severity, and records for expert review. The system is still in the planning stage; no model or diagnostic accuracy has been validated.
+A proposed GPU-accelerated pipeline for classifying wild rice leaf symptoms, segmenting leaves and lesions, estimating visible symptom severity, and routing uncertain cases to expert review. The target is thousands of photographs, with an HPC path for larger collections.
 
-## To-do list
+**Status:** Planning. The model choices, severity grades, and throughput figures below are proposals, not validated wild rice diagnostic results. Expert-confirmed labels and an independent test set are required before using predictions in research.
 
-### 1. Inventory images and references
+## Processing flow
 
-- [ ] Count images and expert-confirmed reference images by disease and healthy category.
-- [ ] Record file formats, image dimensions, species or variety, and collection metadata where available.
-- [ ] Assign stable image IDs and checksums; retain the original high-resolution files.
-- [ ] Identify near-duplicates and images from the same specimen or collection session.
+1. Ingest original photographs and expert-confirmed reference images. Preserve high-resolution originals, stable image IDs, checksums, and collection metadata.
+2. Check image quality; decode, resize, and normalize color with consistent, versioned preprocessing.
+3. Isolate leaves and assign a separate leaf ID and mask to each visible leaf.
+4. Predict disease or stress categories, allowing multiple labels when the annotation scheme supports them.
+5. Segment lesions and other disease-specific symptoms within each leaf mask.
+6. Evaluate confidence and unfamiliar cases; send poor images, uncertain predictions, and unreliable masks for expert review.
+7. Calculate visible symptom severity per leaf when the masks and disease-specific rules support it.
+8. Export per-leaf records, masks, overlays, and a review queue or dashboard.
 
-### 2. Review representative images
+Specialized vision models are the starting point for bulk processing. A multimodal vision-language model may help review difficult cases, but its diagnoses and severity estimates also need validation. A plant pathologist should confirm uncertain diagnoses.
 
-- [ ] Select 5–10 images covering healthy leaves, each suspected disease, different severity levels, and difficult cases.
-- [ ] Check field versus uniform backgrounds, multiple leaves, image quality, and visibility of small lesions after resizing.
-- [ ] Test leaf isolation and produce sample leaf masks and lesion overlays for expert review.
+## Roadmap and tasks
 
-### 3. Define labels and severity rules with an expert
+### Phase 1: Data audit and proof of concept
 
-- [ ] Establish disease, healthy, unknown, and noninfectious-stress categories.
-- [ ] Keep confirmed diagnoses separate from suspected visual labels.
-- [ ] Decide whether co-occurring conditions require multiple labels per leaf.
-- [ ] Define which visible symptoms count toward severity for each disease, and when severity should be withheld.
+- [ ] Locate the image collection and count images, healthy examples, and expert-confirmed references per disease.
+- [ ] Record image format, dimensions, species or variety, leaf age, lighting, collection session, specimen, plot or field, and diagnosis confirmation status where available.
+- [ ] Identify duplicates and near-duplicates; retain original TIFFs and other high-resolution files.
+- [ ] Review 5–10 representative images spanning healthy leaves, suspected diseases, severity levels, field and uniform backgrounds, multiple leaves, and difficult cases.
+- [ ] Test quality checks, leaf isolation, and small-lesion visibility after resizing. Try separate leaf masks and lesion overlays on a sample such as RR8.TIF, then compare with expert assessment.
+- [ ] Extract frozen DINOv2 and DINOv3 small embeddings using the same preprocessing for reference and unlabeled images; store embeddings with stable IDs.
+- [ ] Compare nearest-neighbor reference retrieval with a lightweight classifier, such as logistic regression. Cluster unlabeled embeddings to select annotation candidates and expose possible missing categories.
+- [ ] Record where diseases separate visually, where they overlap, and what additional labels or metadata are needed.
 
-### 4. Prepare an evaluation-ready dataset
+A handful of references can support a prototype, but cannot establish diagnostic accuracy. Similarity scores are not calibrated disease probabilities. Cultivated rice models are not validated for North American wild rice without wild rice evaluation.
 
-- [ ] Create train, validation, and independent test splits grouped by specimen, collection session, plot, or field to prevent leakage.
-- [ ] Select representative images for verified labels and reviewed pixel-level leaf and lesion masks.
-- [ ] Preserve the independent test set during model selection and active learning.
+### Phase 2: Expert labels and segmentation
 
-### 5. Build classification baselines
+- [ ] Have a wild rice pathologist define disease, healthy, unknown, and noninfectious-stress categories, including nutrient deficiency, senescence, and environmental damage.
+- [ ] Keep suspected visual labels separate from expert- or laboratory-confirmed diagnoses. Capture field or laboratory evidence when visual symptoms overlap.
+- [ ] Decide whether co-occurring diseases and stresses require multiple labels per leaf.
+- [ ] Select representative images across embedding clusters, severity levels, lighting, collection sessions, and varieties for annotation.
+- [ ] Create reviewed leaf and lesion masks. Use SAM 2 only to assist annotation; review its boundaries, especially small spots and subtle discoloration.
+- [ ] Define disease-specific severity rules: which areas count as chlorosis, necrosis, or lesions; whether area, lesion count, lesion length, or symptom pattern is the appropriate measure.
+- [ ] Establish when image quality or mask uncertainty requires review or a missing severity value.
 
-- [ ] Extract embeddings with DINOv2 and a DINOv3 small candidate using consistent preprocessing.
-- [ ] Compare reference-image retrieval and a lightweight supervised classifier.
-- [ ] Cluster unlabeled images to find representative annotation candidates and possible missing categories.
-- [ ] Add an explicit unknown or uncertain-case review route.
+### Phase 3: Model comparison and validation
 
-### 6. Build and assess segmentation and severity
+- [ ] Compare frozen DINOv2 and DINOv3 embeddings, a fine-tuned ConvNeXt V2 classifier when labels permit, and any justified fine-tuned transformer model.
+- [ ] Evaluate SegFormer-B0/B2 or a lightweight U-Net for separate leaf and lesion masks.
+- [ ] Test segmentation resolution and high-resolution crops or tiles; map tile predictions to original image coordinates before area calculations.
+- [ ] Implement explicit unknown-case detection and an abstention route. Train a multi-label head only if verified multi-label data exists.
+- [ ] Consider a shared encoder with classification and segmentation heads after independent baselines work; keep it only if measured efficiency gains preserve accuracy.
+- [ ] Split training, validation, and independent test data by plant, specimen, collection session, plot, or field. Keep crops and near-duplicates from one original in the same split.
+- [ ] Calibrate confidence and choose automatic-acceptance thresholds on validation data. Measure accuracy among accepted cases and the fraction sent for review.
+- [ ] Evaluate on an independent expert-labeled test set before using automated results in scientific analysis. Report results by disease and severity group.
 
-- [ ] Evaluate a lightweight segmentation model, such as SegFormer-B0, for separate leaf and lesion masks.
-- [ ] Test image resolution and high-resolution crops or tiles for small lesions.
-- [ ] Calculate visible affected-area percentage per leaf from reviewed mask definitions.
-- [ ] Compare predicted masks and percentages with independently reviewed masks and expert assessments.
+### Phase 4: Production inference and review
 
-### 7. Compare models and set acceptance criteria
+- [ ] Package the selected models, preprocessing, and configuration in a reproducible, versioned workflow.
+- [ ] Load each model once per worker; process batches or image shards, with Slurm job arrays when they help. Make shards resumable and record failures explicitly.
+- [ ] Benchmark batch size, image resolution, BF16/FP16 if supported, GPU memory, CPU preprocessing, TIFF decoding, storage I/O, mask writing, and end-to-end throughput on the actual hardware.
+- [ ] Export CSV and/or Parquet records plus PNG masks and overlays. Build a review queue or dashboard for uncertain cases.
+- [ ] Track model and preprocessing versions, image checksums, inference dates, review decisions, and retraining data.
+- [ ] Use active learning to prioritize uncertain images, underrepresented groups, and disagreements between models and reference retrieval; periodically audit representative confident cases.
 
-- [ ] Compare the embedding baseline with a fine-tuned classifier when enough verified labels exist.
-- [ ] Measure per-class precision and recall, macro-F1, mask Dice/IoU, severity error and bias, and review workload.
-- [ ] Calibrate confidence and set thresholds for automatic results versus expert review using validation data.
-- [ ] Report performance by disease and severity group on the independent test set.
+## Severity measurement
 
-### 8. Build the reproducible HPC pipeline
+For a disease where affected area is an appropriate measure:
 
-- [ ] Package selected models and preprocessing in a versioned workflow for the available GPU environment.
-- [ ] Implement batched inference, quality checks, resumable image shards, and explicit failure records.
-- [ ] Export per-leaf CSV or Parquet records, masks, overlays, model versions, and review flags.
-- [ ] Benchmark end-to-end throughput, GPU memory, decoding, storage I/O, and output writing on actual hardware.
+**Visible affected area (%) = 100 × affected pixels inside the leaf mask / visible leaf pixels.**
 
-## Inputs needed to begin
+Compute this separately for each leaf. Do not count background, shadows, reflections, normal yellowing, or unrelated stress as disease. If the cause has not been confirmed, label the result **visible symptom area**, not confirmed disease area. The measure covers photographed leaf tissue only, not hidden tissue, the whole plant, or field-level burden.
 
-- Image dataset location and approximate image count.
-- Number of expert-confirmed references per disease.
-- Typical image setup: field backgrounds, isolated leaves, or both.
-- Available GPU environment: Slurm cluster, workstation GPU, or undecided.
-- Access to a wild rice pathologist for label and severity review.
+The following grades are illustrative and need pathologist approval:
+
+| Grade | Visible affected area | Description |
+| --- | --- | --- |
+| 0 | 0% | No visible symptoms |
+| 1 | >0–5% | Very mild |
+| 2 | >5–15% | Mild |
+| 3 | >15–30% | Moderate |
+| 4 | >30–50% | Severe |
+| 5 | >50% | Very severe |
+
+Compare predicted percentages against independently reviewed masks and expert assessments. Report mean absolute error in percentage points and systematic bias; small segmentation errors can materially affect severity.
+
+## Candidate tools and models
+
+| Role | Candidates |
+| --- | --- |
+| Image loading and preprocessing | Pillow, OpenCV |
+| Embeddings and initial classification | Frozen DINOv2 or DINOv3 small; nearest neighbors or logistic regression |
+| Later disease classification | Fine-tuned ConvNeXt V2 or transformer encoder |
+| Leaf and lesion segmentation | SegFormer-B0/B2 or lightweight U-Net |
+| Mask annotation assistance | SAM 2 with human review |
+| Difficult-case review | Validated multimodal vision-language model and plant pathologist |
+| Training and experiment tracking | PyTorch, MLflow |
+| Annotation | CVAT or Label Studio |
+| HPC orchestration | Slurm |
+| Outputs | CSV or Parquet; PNG masks and overlays |
+
+Choose the actual models based on held-out disease accuracy, mask quality, severity error, memory, throughput, and deployment constraints. Classification quality does not establish lesion-boundary quality.
+
+## Evaluation and acceptance
+
+- **Disease prediction:** macro-F1, per-class precision and recall, confusion matrices, and appropriate per-label metrics for multi-label cases.
+- **Segmentation:** Dice and intersection over union for leaf and lesion masks.
+- **Severity:** mean absolute error in percentage points and bias by disease and severity group.
+- **Operations:** end-to-end throughput, GPU memory, processing failures, and expert review workload.
+- **Automatic use:** define an acceptance threshold only after confidence calibration and independent evaluation; otherwise flag the case for review.
+
+Throughput examples in the source plan (20, 100, or 250 images per second) are planning scenarios, not measured performance. Training, annotation, queue delays, model loading, and human review are additional costs.
+
+## Output records
+
+Write one record per leaf, linked to its source image. Include:
+
+- Image ID, leaf ID, specimen ID, source checksum, species or variety, and collection/session/plot/field IDs where known.
+- Predicted disease or multi-label scores, documented confidence, alternative predictions, and diagnostic confirmation status.
+- Visible severity percentage and any approved grade, leaf and lesion pixel areas, and the rule used to calculate severity.
+- Quality flags, prediction status, review-required flag, abstention or error reason, and review outcome.
+- Leaf-mask, lesion-mask, and overlay paths; model version, preprocessing version, and inference date.
+
+Keep masks and overlays for audit and expert review. Never silently skip unreadable images or force unfamiliar cases into a known class.
+
+## Inputs needed to start
+
+1. Image dataset location and approximate count.
+2. Number of expert-confirmed references per disease, including healthy and noninfectious examples.
+3. Typical photographs: field backgrounds, isolated leaves, or a mix.
+4. Available GPU environment: Slurm cluster, single workstation GPU, or undecided.
+5. Access to a wild rice pathologist for labels, severity definitions, and review.
+
+The first executable milestone is an image inventory and a 5–10-image sample review.
