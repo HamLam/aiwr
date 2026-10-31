@@ -1,8 +1,23 @@
 # Wild Rice Leaf Disease Diagnosis
 
-A proposed GPU-accelerated pipeline for classifying wild rice leaf symptoms, segmenting leaves and lesions, estimating visible symptom severity, and routing uncertain cases to expert review. The target is thousands of photographs, with an HPC path for larger collections.
+A working review prototype and a proposed GPU-accelerated pipeline for classifying wild rice leaf symptoms, segmenting leaves and lesions, estimating visible symptom severity, and routing uncertain cases to expert review. The target is thousands of photographs, with an HPC path for larger collections.
 
-**Status:** Planning. The model choices, severity grades, and throughput figures below are proposals, not validated wild rice diagnostic results. Expert-confirmed labels and an independent test set are required before using predictions in research.
+**Status:** The Streamlit and command-line prototype screens controlled-background photographs and gives a tentative per-leaf visual diagnosis before reviewer input. It has not been validated against expert-confirmed diagnoses. The model choices and throughput figures below remain proposals. Expert-confirmed labels and an independent test set are required before using predictions in research.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `app.py` | Streamlit interface with initial findings, reviewer cues, and exports |
+| `aiwr/` | Image analysis, visual diagnosis, knowledge rules, CLI, and evaluation |
+| `docs/plan.md` | Full pipeline plan |
+| `docs/diagnostic_protocol.txt` | Diagnostic instructions and severity bins |
+| `examples/labels_template.csv` | Template for confirmed evaluation labels |
+| `reports/sample_runs.md` | Prototype runs and validation limits |
+| `tests/` | Automated tests |
+| `knowledge/`, `samples_images/` | Local reference PDFs and sample TIFFs; excluded from Git |
+
+The app can accept uploaded images without the sample TIFFs. The reference PDF viewer requires files in `knowledge/`; these guides and the large TIFF collection are not distributed in this repository.
 
 ## Processing flow
 
@@ -131,3 +146,39 @@ Keep masks and overlays for audit and expert review. Never silently skip unreada
 5. Access to a wild rice pathologist for labels, severity definitions, and review.
 
 The first executable milestone is an image inventory and a 5–10-image sample review.
+
+## Current prototype app
+
+The repository includes a **review-first prototype**. It reads TIFF, JPEG, or PNG images; finds separate leaf-shaped regions in controlled gray-background photographs; marks provisional discolored pixels; applies the severity bins from `docs/diagnostic_protocol.txt`; and renders a per-leaf report with a tentative image-based diagnosis before reviewer input. Its reviewer cue checklist links visual differentials to specific pages in the local PDFs. It never assigns a confirmed pathogen automatically. The PDFs and sample TIFFs remain local and are excluded from Git.
+
+The current segmentation uses color and shape thresholds, not a trained leaf or lesion model. It can miss subtle spots, overcount senescence or shadows, and fail on field backgrounds, stems, panicles, or overlapping leaves. Species identity also cannot be confirmed from appearance alone. All outputs require expert review.
+
+On this MSI system, create the local app environment once. The shared Python installation is missing Streamlit's WebSocket dependency, so launching its global `streamlit` command fails. This project's `.venv` is ignored by Git.
+
+```bash
+module load python3/3.12.4_anaconda2024.06-1_libmamba
+python -m venv --system-site-packages .venv
+.venv/bin/python -m pip install 'websockets>=12,<16.1'
+.venv/bin/python -m streamlit run app.py
+```
+
+For later launches, run `./run_app.sh` from this directory (or use the full `.venv/bin/python -m streamlit run app.py` command). The server health endpoint was checked after this setup. For a separate clean installation, use `requirements.txt` to install all app dependencies. Upload an image in the app if the local sample folder is unavailable.
+
+For a batch or reproducible test run:
+
+```bash
+.venv/bin/python -m aiwr.cli samples_images/99_2024_Surv_bp_Waskish_August/RR8.TIF --output-dir outputs/rr8
+.venv/bin/python -m pytest -q tests
+```
+
+The CLI writes JSON, per-leaf CSV, overlays, leaf masks, and provisional symptom masks. Run the Streamlit interface from an MSI interactive or Open OnDemand session where its browser port is accessible.
+
+### Measuring the 90% target
+
+The sample TIFFs do not contain an independent, expert-confirmed per-leaf diagnosis file. **Diagnostic accuracy has not been measured.** To evaluate it, fill a copy of `examples/labels_template.csv` with confirmed labels and run:
+
+```bash
+.venv/bin/python -m aiwr.evaluate outputs/rr8/leaves.csv confirmed_labels.csv
+```
+
+The evaluation command counts abstentions and missing predictions against overall accuracy and reports diagnostic coverage separately. A 90% claim requires an independent held-out set of expert- or laboratory-confirmed diagnoses. Segmentation and severity accuracy need separately reviewed masks and severity values. The next model-development step is to build that labeled set, then train and compare the embedding and segmentation baselines described above.
