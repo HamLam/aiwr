@@ -4,6 +4,12 @@ This repository contains a Streamlit app for reviewing photographs of wild rice 
 
 The longer-term GPU pipeline is described in [the full plan](docs/plan.md). The current app is a prototype, not the validated classifier and lesion segmentation system proposed there.
 
+**MSI project location:** `/projects/standard/support/shared/lamx0031/Codex/aiwr`. All relative commands and paths below, including `.venv/bin/python` and `.venv-hcl/bin/python`, assume this directory is the current working directory:
+
+```bash
+cd /projects/standard/support/shared/lamx0031/Codex/aiwr
+```
+
 ## Repository layout
 
 | Path | Purpose |
@@ -59,6 +65,7 @@ The app marks candidate brown, yellowed, and unusually dark pixels inside each l
 On this MSI system, the rule-based launcher uses a local environment to supply Streamlit's WebSocket dependency:
 
 ```bash
+cd /projects/standard/support/shared/lamx0031/Codex/aiwr
 module load python3/3.12.4_anaconda2024.06-1_libmamba
 python -m venv --system-site-packages .venv
 .venv/bin/python -m pip install 'websockets>=12,<16.1'
@@ -95,6 +102,7 @@ The vision model **does not calculate the displayed severity percentage**. Befor
 On MSI, the `DeepLearningHCL` environment provides GPU PyTorch. The project `.venv-hcl` overlay supplies compatible Transformers and Streamlit packages while keeping the conda environment unchanged:
 
 ```bash
+cd /projects/standard/support/shared/lamx0031/Codex/aiwr
 PYTHONNOUSERSITE=1 /users/9/lamx0031/.conda/envs/DeepLearningHCL/bin/python -m venv --system-site-packages .venv-hcl
 PYTHONNOUSERSITE=1 .venv-hcl/bin/python -m pip install -r requirements-vision-hcl.txt
 env -u LD_LIBRARY_PATH -u CUDA_HOME -u CUDA_PATH \
