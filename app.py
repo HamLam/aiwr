@@ -11,6 +11,7 @@ from PIL import Image
 
 from aiwr.diagnostic import analyze_image
 from aiwr.knowledge import CUES, RULES, differential
+from aiwr.vision import DEFAULT_MODEL, MODEL_OPTIONS, analyze_with_vision
 
 
 ROOT = Path(__file__).resolve().parent
@@ -61,9 +62,16 @@ def markdown_table(rows):
 
 st.set_page_config(page_title="Wild Rice Disease Review", layout="wide")
 st.title("Wild Rice Disease Review")
-st.caption("Prototype color screening and source-backed reviewer differential. Not a validated pathogen classifier.")
+st.caption("Choose rule-based or local vision-model diagnosis. Both are unvalidated visual differentials.")
 st.info("Every automated finding requires expert review. A photograph cannot establish species or pathogen identity by itself. The percentage describes visible color change, not confirmed disease area.")
 
+diagnostic_method = st.radio(
+    "Diagnostic method", ["Rule-based", "Vision model (local GPU)"], horizontal=True)
+model_id = (
+    st.selectbox("Vision model", MODEL_OPTIONS,
+                 format_func=lambda value: value.rsplit("/", 1)[-1])
+    if diagnostic_method == "Vision model (local GPU)" else DEFAULT_MODEL
+)
 sample_files = sorted(SAMPLES.rglob("*.TIF")) if SAMPLES.exists() else []
 source_mode = st.radio("Image source", ["Sample image", "Upload image"], horizontal=True)
 raw = None
@@ -109,9 +117,32 @@ if raw is not None:
     if result.quality_flags:
         st.warning("Quality flags: " + ", ".join(result.quality_flags))
 
+    if diagnostic_method == "Vision model (local GPU)":
+        st.caption(
+            f"{model_id} examines each detected leaf using the diagnostic protocol "
+            "and reference-guide text. Leaf detection and visible color-change severity "
+            "still use the rule-based image masks. A CUDA GPU is required.")
+        vision_key = f"vision:{result.image_sha256}:{max_side}:{model_id}"
+        if st.button("Run vision diagnosis", type="primary"):
+            try:
+                with st.spinner("Examining each leaf with the vision model..."):
+                    st.session_state[vision_key] = analyze_with_vision(
+                        result, raw, model_id=model_id)
+            except Exception as exc:
+                st.error(f"Vision diagnosis could not run: {exc}")
+                st.stop()
+        if vision_key not in st.session_state:
+            st.info("Select Run vision diagnosis to load the model and create findings.")
+            st.stop()
+        result = st.session_state[vision_key]
+
     st.subheader("Diagnostic findings")
     st.caption("Initial image-based diagnoses appear below before reviewer input. They are tentative visual differentials, not confirmed pathogen calls.")
     report_rows = [finding.as_dict() for finding in result.leaves]
+    for row in report_rows:
+        row["Diagnostic Method"] = (
+            f"vision_model:{model_id}"
+            if diagnostic_method == "Vision model (local GPU)" else "rule_based")
     findings_table = st.empty()
     findings_table.markdown(markdown_table(report_rows))
 
@@ -162,7 +193,8 @@ if raw is not None:
     st.download_button("Download per-leaf CSV", csv_bytes(report_rows),
                        file_name=f"{Path(filename).stem}_findings.csv", mime="text/csv")
     st.download_button("Download result JSON", json.dumps(
-        {"image": result.to_dict(), "reviewed_rows": report_rows},
+        {"diagnostic_method": diagnostic_method, "image": result.to_dict(),
+         "reviewed_rows": report_rows},
         indent=2, default=str).encode("utf-8"),
         file_name=f"{Path(filename).stem}_findings.json", mime="application/json")
     overlay_bytes = BytesIO()

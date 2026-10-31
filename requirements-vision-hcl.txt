@@ -1,0 +1,4 @@
+-r requirements.txt
+PyMuPDF>=1.23,<2
+transformers>=4.51,<5
+accelerate>=1.0

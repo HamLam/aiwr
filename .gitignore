@@ -5,3 +5,6 @@ outputs/
 .streamlit/
 samples_images/
 .venv/
+.venv-vision/
+.venv-hcl/
+.model_cache/
