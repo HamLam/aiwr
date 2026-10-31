@@ -3,6 +3,5 @@ __pycache__/
 *.py[cod]
 outputs/
 .streamlit/
-knowledge/
 samples_images/
 .venv/

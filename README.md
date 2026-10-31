@@ -18,9 +18,10 @@ The longer-term plan is a GPU-capable pipeline for larger image collections. See
 | `reports/sample_runs.md` | Prototype results and validation limits |
 | `tests/` | Automated checks |
 | `run_app.sh`, `requirements.txt` | App launcher and Python dependencies |
-| `knowledge/`, `samples_images/`, `outputs/` | Local reference PDFs, sample TIFFs, and generated results; excluded from Git |
+| `knowledge/` | Reference PDFs used to document the diagnostic criteria |
+| `samples_images/`, `outputs/` | Local sample TIFFs and generated results; excluded from Git |
 
-The app accepts uploaded TIFF, JPEG, and PNG images without the local sample folder. The PDF reference viewer requires the guides in `knowledge/`. The large sample collection and local PDFs are not distributed through this repository.
+The app accepts uploaded TIFF, JPEG, and PNG images without the local sample folder. The reference guides are included in `knowledge/` for the PDF viewer and source citations. The large sample TIFF collection remains local.
 
 ## Current prototype workflow
 
