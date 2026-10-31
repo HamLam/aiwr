@@ -11,6 +11,7 @@ from PIL import Image
 
 from aiwr.diagnostic import analyze_image
 from aiwr.knowledge import CUES, RULES, differential
+from aiwr.review_store import CONFIRMATION_SOURCES, DEFAULT_STORE, save_review
 from aiwr.vision import DEFAULT_MODEL, MODEL_OPTIONS, analyze_with_vision
 
 
@@ -147,7 +148,9 @@ if raw is not None:
     findings_table.markdown(markdown_table(report_rows))
 
     st.subheader("Per-leaf review")
-    st.write("Select observed cues for each leaf. Matches are visual differentials, never calibrated probabilities or confirmed causes.")
+    st.write("Select observed cues for each leaf. Matches are visual differentials, never calibrated probabilities or confirmed causes. Save each completed review to the local review store.")
+    reviewer_id = st.text_input("Reviewer ID (required to save)")
+    specimen_id = st.text_input("Specimen or collection ID (recommended for dataset grouping)")
     for finding, row in zip(result.leaves, report_rows):
         with st.expander(f"{finding.leaf_identifier}: {finding.disease_severity_percent:.2f}% visible color change",
                          expanded=len(result.leaves) <= 3):
@@ -180,15 +183,33 @@ if raw is not None:
             st.write(row["Primary Diagnosis"])
             st.caption(row["Sources Used"])
             reviewed = st.selectbox(
-                "Reviewer-entered label (optional; stored in this export only)",
+                "Reviewer-entered label (required to save)",
                 ["No reviewer label"] + [rule.name for rule in RULES if rule.tissue == tissue]
                 + ["Healthy", "Unknown / Other"],
                 key=f"label_{filename}_{finding.leaf_identifier}")
             if reviewed != "No reviewer label":
                 row["Primary Diagnosis"] = reviewed
                 row["Diagnostic Confirmation Status"] = "reviewer_entered_unverified"
-                row["Secondary / Co-infection Notes"] += (
-                    " Reviewer-entered label; independent confirmation status not established.")
+            confirmation_source = st.selectbox(
+                "Review confirmation status (required to save)",
+                ["Choose status"] + list(CONFIRMATION_SOURCES),
+                format_func=lambda key: CONFIRMATION_SOURCES.get(key, key),
+                key=f"confirmation_{filename}_{finding.leaf_identifier}")
+            if reviewed != "No reviewer label" and confirmation_source != "Choose status":
+                row["Diagnostic Confirmation Status"] = confirmation_source
+            notes = st.text_area("Reviewer notes (optional)",
+                                 key=f"notes_{filename}_{finding.leaf_identifier}")
+            if st.button("Save reviewed leaf", key=f"save_{filename}_{finding.leaf_identifier}"):
+                try:
+                    event = save_review(
+                        result, finding, raw, reviewer_id=reviewer_id, label=reviewed,
+                        cues=selected, tissue=tissue, confirmation_source=confirmation_source,
+                        diagnostic_method=row["Diagnostic Method"], notes=notes,
+                        specimen_id=specimen_id)
+                except (ValueError, OSError) as exc:
+                    st.error(f"Review was not saved: {exc}")
+                else:
+                    st.success(f"Saved review {event['review_id'][:12]} to {DEFAULT_STORE}")
     findings_table.markdown(markdown_table(report_rows))
     st.download_button("Download per-leaf CSV", csv_bytes(report_rows),
                        file_name=f"{Path(filename).stem}_findings.csv", mime="text/csv")

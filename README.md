@@ -19,6 +19,7 @@ cd /projects/standard/support/shared/lamx0031/Codex/aiwr
 | `aiwr/autodiagnosis.py` | Rule-based disease suggestions |
 | `aiwr/vision.py` | Vision-model loading, knowledge context, and per-leaf diagnosis |
 | `aiwr/knowledge.py` | Reviewer cues and source mappings |
+| `aiwr/review_store.py` | Append-only review storage and curated dataset export |
 | `aiwr/cli.py`, `aiwr/evaluate.py` | Rule-based batch export and evaluation against confirmed labels |
 | `docs/` | [Pipeline plan](docs/plan.md) and [diagnostic protocol](docs/diagnostic_protocol.txt) |
 | `knowledge/` | Reference PDFs cited by the app; includes the CCM disease guide |
@@ -26,7 +27,7 @@ cd /projects/standard/support/shared/lamx0031/Codex/aiwr
 | `reports/` | [Rule-based](reports/sample_runs.md) and [vision-model](reports/vision_sample_runs.md) smoke runs |
 | `tests/` | Automated checks |
 | `requirements*.txt`, `run_app.sh` | Dependencies and launcher |
-| `samples_images/`, `outputs/` | Local TIFF collection and generated results; excluded from Git |
+| `samples_images/`, `outputs/`, `reviews/` | Local TIFF collection, generated results, and saved review data; excluded from Git |
 
 The app accepts uploaded TIFF, JPEG, and PNG images without the local sample folder. Vision-model weights download into the ignored `.model_cache/` directory when first used.
 
@@ -37,7 +38,7 @@ The app accepts uploaded TIFF, JPEG, and PNG images without the local sample fol
 3. Color and shape thresholds separate tall, narrow leaf-like regions from the controlled gray background. Each region gets a leaf ID and mask. This step does not verify wild rice species and can fail on field backgrounds or overlapping leaves.
 4. The selected diagnostic method produces a tentative **Primary Diagnosis** for each detected leaf. The findings table appears before the reviewer controls.
 5. The shared symptom mask and severity calculation produce a visible color-change percentage and category for each leaf, regardless of diagnostic method.
-6. A reviewer can select observed cues or enter a label. CSV, JSON, and overlay downloads retain the initial automatic candidate separately from reviewer changes.
+6. A reviewer selects observed cues, enters a label, chooses a confirmation status, and clicks **Save reviewed leaf**. The app immediately saves that leaf's review and image assets under `reviews/`. CSV, JSON, and overlay downloads remain available.
 
 ## Rule-based diagnosis
 
@@ -132,7 +133,17 @@ For example, 150 marked pixels among 1,000 visible leaf pixels give **15% — Mo
 
 ## Review, exports, and evaluation
 
-The reviewer-observed cue menu compares human-selected features with guide-based differentials. The reviewer-entered label menu can override the displayed diagnosis, but that entry remains unverified until separately confirmed. The export retains **Auto Candidate** and **Diagnostic Method** so a later evaluation can distinguish the original automated suggestion from a reviewer override.
+The reviewer-observed cue menu compares human-selected features with guide-based differentials. The reviewer-entered label menu can override the displayed diagnosis. Saving requires a reviewer ID, a label, and an explicit confirmation status: **Expert visual review**, **Laboratory confirmed**, or **Needs adjudication**. The confirmation status records the reviewer's stated evidence level; selecting it does not independently verify the diagnosis. The app also accepts an optional specimen or collection ID and reviewer notes.
+
+Each click on **Save reviewed leaf** creates an immutable JSON review event in `reviews/events/`. The event links to the original uploaded image (stored once by SHA-256), a masked leaf crop, and a leaf mask. It also stores the initial automatic diagnosis, method, severity estimate, reviewer label and cues, reviewer ID, and timestamp. Later corrections create another event, preserving review history. `reviews/` is excluded from Git and should be backed up as research data.
+
+Launch the app and save reviews first; no command is needed before reviewing. To create or refresh the training manifest after reviews have been saved, run this from the project directory:
+
+```bash
+.venv/bin/python -m aiwr.review_store
+```
+
+This writes `reviews/dataset.jsonl` with image paths and labels. It uses the latest review for each source image and leaf ID, and includes only leaf-tissue reviews marked expert visual or laboratory confirmed. Reviews marked **Needs adjudication**, **Unknown / Other**, and stem or panicle reviews remain in the audit store but are excluded from this leaf-classification manifest. Group train/validation/test splits by specimen or collection ID when available; leaves from the same image must stay in the same split. The manifest is a curated input for a later fine-tuning script, not a fine-tuned model or a measured accuracy result. CSV and JSON downloads retain **Auto Candidate** and **Diagnostic Method** for evaluating automatic suggestions separately from reviewer labels.
 
 The sample images do not include independent expert-confirmed per-leaf diagnoses or reviewed lesion masks. **Diagnostic accuracy and severity error have not been measured; the 90% accuracy target remains unverified.** To evaluate automatic diagnoses, copy `examples/labels_template.csv`, enter expert- or laboratory-confirmed labels, and run:
 
