@@ -1,52 +1,88 @@
-# Wild Rice Leaf Disease Diagnosis
+# Wild Rice Disease Review and Diagnostic
 
-This repository contains a Streamlit app for reviewing photographs of wild rice leaves. It offers two ways to produce an **initial, tentative visual diagnosis**: a rule-based method and a pretrained vision-language model. Both work one detected leaf at a time and show the diagnosis before reviewer input. Neither method has been validated against expert-confirmed diagnoses, so every finding requires review.
+This repository contains a Streamlit app and command-line tools for screening wild rice leaf photographs. The app shows a tentative diagnosis for each detected leaf before a reviewer enters observations or a label. It offers a custom rule-based method and a pretrained Qwen2.5 vision-language model. Neither method has measured diagnostic accuracy against an expert-labeled test set, so their outputs require expert review.
 
-The longer-term GPU pipeline is described in [the full plan](docs/plan.md). The current app is a prototype, not the validated classifier and lesion segmentation system proposed there.
+The current implementation is a prototype. [The pipeline plan](docs/plan.md) describes the proposed training, segmentation, validation, and larger-scale GPU workflow.
 
-**MSI project location:** `/projects/standard/support/shared/lamx0031/Codex/aiwr`. All relative commands and paths below, including `.venv/bin/python` and `.venv-hcl/bin/python`, assume this directory is the current working directory:
+## Project location and contents
+
+On the MSI system, this project is at `/projects/standard/support/shared/lamx0031/Codex/aiwr`. The commands below assume you start there:
 
 ```bash
 cd /projects/standard/support/shared/lamx0031/Codex/aiwr
 ```
 
-## Repository layout
-
 | Path | Purpose |
 | --- | --- |
-| `app.py` | Streamlit interface, method selector, reviewer controls, PDF viewer, and downloads |
-| `aiwr/diagnostic.py` | Shared leaf detection, visible color-change masks, and severity calculation |
-| `aiwr/autodiagnosis.py` | Rule-based disease suggestions |
-| `aiwr/vision.py` | Vision-model loading, knowledge context, and per-leaf diagnosis |
-| `aiwr/knowledge.py` | Reviewer cues and source mappings |
-| `aiwr/review_store.py` | Append-only review storage and curated dataset export |
-| `aiwr/cli.py`, `aiwr/evaluate.py` | Rule-based batch export and evaluation against confirmed labels |
+| `app.py` | Streamlit interface for diagnosis, per-leaf review, reference PDFs, and downloads |
+| `aiwr/diagnostic.py` | Leaf detection, image masks, and visible color-change severity |
+| `aiwr/autodiagnosis.py` | Handwritten rule-based disease suggestions |
+| `aiwr/vision.py` | Qwen model loading, knowledge context, and per-leaf vision diagnosis |
+| `aiwr/cli.py` | Rule-based processing of image files or folders |
+| `aiwr/vision_batch.py` | Resumable vision diagnosis of image files or folders |
+| `aiwr/review_store.py` | Saved reviewer decisions and curated dataset manifest |
+| `aiwr/evaluate.py` | Comparison with independently confirmed labels |
 | `docs/` | [Pipeline plan](docs/plan.md) and [diagnostic protocol](docs/diagnostic_protocol.txt) |
-| `knowledge/` | Reference PDFs cited by the app; includes the CCM disease guide |
-| `examples/labels_template.csv` | Template for independently confirmed per-leaf labels |
-| `reports/` | [Rule-based](reports/sample_runs.md) and [vision-model](reports/vision_sample_runs.md) smoke runs |
+| `knowledge/` | Reference PDFs, including the CCM wild rice disease guide |
+| `examples/labels_template.csv` | Template for confirmed per-leaf labels |
+| `reports/` | [Rule-based](reports/sample_runs.md) and [vision-model](reports/vision_sample_runs.md) sample runs |
 | `tests/` | Automated checks |
-| `requirements*.txt`, `run_app.sh` | Dependencies and launcher |
-| `samples_images/`, `outputs/`, `reviews/` | Local TIFF collection, generated results, and saved review data; excluded from Git |
+| `samples_images/`, `outputs/`, `reviews/`, `.model_cache/` | Local images, results, reviewer data, and downloaded model weights; excluded from Git |
 
-The app accepts uploaded TIFF, JPEG, and PNG images without the local sample folder. Vision-model weights download into the ignored `.model_cache/` directory when first used.
+Uploaded TIFF, JPEG, and PNG images work without the local sample collection. The reference PDFs and protocol ship with the repository; the Qwen model weights download into `.model_cache/` on first use.
 
-## Shared app workflow
+## Run the app
 
-1. Select a sample or upload an image, then choose **Rule-based** or **Vision model (local GPU)**.
-2. The app corrects image orientation, converts it to RGB, and scales it to the selected analysis size. It records a checksum of the original file.
-3. Color and shape thresholds separate tall, narrow leaf-like regions from the controlled gray background. Each region gets a leaf ID and mask. This step does not verify wild rice species and can fail on field backgrounds or overlapping leaves.
-4. The selected diagnostic method produces a tentative **Primary Diagnosis** for each detected leaf. The findings table appears before the reviewer controls.
-5. The shared symptom mask and severity calculation produce a visible color-change percentage and category for each leaf, regardless of diagnostic method.
-6. A reviewer selects observed cues, enters a label, chooses a confirmation status, and clicks **Save reviewed leaf**. The app immediately saves that leaf's review and image assets under `reviews/`. CSV, JSON, and overlay downloads remain available.
+### Rule-based setup
 
-## Rule-based diagnosis
+On MSI, the rule-based launcher uses the local Python environment and supplies Streamlit's WebSocket dependency:
 
-### How it chooses a diagnosis
+```bash
+module load python3/3.12.4_anaconda2024.06-1_libmamba
+python -m venv --system-site-packages .venv
+.venv/bin/python -m pip install 'websockets>=12,<16.1'
+./run_app.sh
+```
 
-The rule-based method uses handwritten image-processing rules; it is **not a trained disease classifier**. Within each leaf, it groups dark pixels into spots and measures each group's size and width-to-height ratio. It counts compact spots, elongated spots, larger oval blotches, and long narrow streaks. The first matching rule supplies the tentative result:
+The rule-based method uses image processing rules and needs no model training or GPU. It still needs validation against expert-labeled images. For a rule-based folder run, use:
 
-| Tentative result | Measured pattern |
+```bash
+.venv/bin/python -m aiwr.cli samples_images/99_2024_Surv_bp_Waskish_August \
+  --output-dir outputs/rule_batch
+```
+
+This writes `results.json`, `leaves.csv`, overlays, leaf masks, and provisional symptom masks.
+
+### Vision-model setup on an MSI GPU node
+
+The `DeepLearningHCL` environment provides GPU PyTorch. A local `.venv-hcl` overlay supplies compatible Transformers and Streamlit packages without changing the conda environment:
+
+```bash
+PYTHONNOUSERSITE=1 /users/9/lamx0031/.conda/envs/DeepLearningHCL/bin/python \
+  -m venv --system-site-packages .venv-hcl
+PYTHONNOUSERSITE=1 .venv-hcl/bin/python -m pip install -r requirements-vision-hcl.txt
+env -u LD_LIBRARY_PATH -u CUDA_HOME -u CUDA_PATH \
+  PYTHONNOUSERSITE=1 USE_TF=0 \
+  .venv-hcl/bin/python -m streamlit run app.py
+```
+
+The launch command has worked on an MSI GPU node. Clearing inherited CUDA library paths prevents them from overriding the libraries used by this PyTorch environment; no separate CUDA or cuDNN module was needed there. A clean GPU environment can instead use `requirements-vision.txt`, which includes PyTorch. Model weights are cached in `.model_cache/`. Both 3B and 7B checkpoints loaded together on an A40 using about 22.6 GiB of allocated GPU memory; restart Streamlit to release cached models. A warning about an ignored `temperature` generation flag is nonfatal.
+
+### Single-image workflow
+
+1. Select **Rule-based** or **Vision model (local GPU)**, then choose a sample image or upload TIFF, JPEG, or PNG.
+2. The app corrects image orientation, converts it to RGB, and shrinks the whole image proportionally if its longest side exceeds **Maximum analysis dimension**. The slider runs from 800 to 2400 pixels, with 1600 as the default. Smaller images are not enlarged. More pixels preserve small visual details but take more memory and time.
+3. Color and shape rules detect tall, narrow leaf-like regions against the controlled background. Each region receives a leaf ID and mask. Detection may fail on field backgrounds or overlapping leaves and does not verify the plant species.
+4. The selected method gives each leaf a tentative **Primary Diagnosis** before reviewer input. The shared image masks give a visible color-change percentage and severity class.
+5. A reviewer can select observed cues, enter a label, choose a confirmation status, and click **Save reviewed leaf**. CSV, JSON, and overlay downloads remain available.
+
+## How diagnosis works
+
+### Rule-based method
+
+This method has no trained model weights. Inside each detected leaf, it groups dark pixels and measures spot size and shape. The first matching handwritten rule supplies the tentative diagnosis:
+
+| Tentative result | Pattern measured by the rules |
 | --- | --- |
 | Healthy | No marked color change and almost no dark spots |
 | Bacterial Leaf Streak | At least two long narrow dark streaks and fewer than five compact spots |
@@ -55,73 +91,23 @@ The rule-based method uses handwritten image-processing rules; it is **not a tra
 | Leaf Spot | At least five compact dark spots |
 | No disease-specific choice | No rule has enough evidence |
 
-For example, several elongated areas among many compact spots favor *Fungal Brown Spot (tentative visual diagnosis)*. The automatic rules do not reliably identify yellow halos, water-soaked tissue, exudate, or fungal structures. Different diseases and noninfectious damage can produce similar shapes.
+These measurements do not reliably identify yellow halos, water-soaked tissue, exudate, or fungal structures. Similar shapes can arise from different diseases or noninfectious damage. The method can be tuned, but its present accuracy is unknown.
 
-### How rule-based severity is determined
+### Vision-model method
 
-The app marks candidate brown, yellowed, and unusually dark pixels inside each leaf mask, then removes tiny groups and pixels near the leaf edge. It calculates the percentage and category using the **shared severity method** below. The severity mask does not identify which disease caused a marked pixel.
+The app offers [Qwen2.5-VL-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct) by default and [Qwen2.5-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct) as an option. Neither checkpoint has been fine-tuned on this wild rice collection.
 
-### Run the rule-based app or CLI
+After leaf detection, the app crops each leaf from the resized analysis image and masks surrounding pixels to gray. It sends the crop to Qwen with text from `docs/diagnostic_protocol.txt` and extractable text from `knowledge/WildRice_diseases_CCM_v2_compressed.pdf`. The PDF illustrations are visible in the reference viewer but are not supplied to the model as reference images.
 
-On this MSI system, the rule-based launcher uses a local environment to supply Streamlit's WebSocket dependency:
+The model returns a proposed label, observed cues, possible alternatives, and an explanation. The app checks that the label is allowed and displays it in **Primary Diagnosis**. It can also report **Healthy** or abstain when evidence is insufficient. Source references document category criteria; they do not confirm the cause of symptoms in a photographed leaf. If the model fails or returns an invalid response, the app reports the error rather than substituting a rule-based diagnosis. [Initial GPU runs](reports/vision_sample_runs.md) show differing 3B and 7B outputs, but do not establish which is more accurate.
 
-```bash
-cd /projects/standard/support/shared/lamx0031/Codex/aiwr
-module load python3/3.12.4_anaconda2024.06-1_libmamba
-python -m venv --system-site-packages .venv
-.venv/bin/python -m pip install 'websockets>=12,<16.1'
-./run_app.sh
-```
+### Shared severity scale
 
-For batch screening and tests:
-
-```bash
-.venv/bin/python -m aiwr.cli samples_images/99_2024_Surv_bp_Waskish_August/RR8.TIF --output-dir outputs/rr8
-.venv/bin/python -m pytest -q tests
-```
-
-The CLI is rule-based only. It writes per-leaf CSV and JSON records, overlays, leaf masks, and provisional symptom masks.
-
-## Vision-model diagnosis
-
-### How it chooses a diagnosis
-
-Select **Vision model (local GPU)**, choose [Qwen2.5-VL-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct) or [Qwen2.5-VL-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct), then select **Run vision diagnosis**. The 3B model is the default. The 7B model uses a larger checkpoint and more GPU memory; its accuracy on these wild rice images has not been established.
-
-The app crops each detected leaf and masks surrounding pixels to gray. It sends that crop to the pretrained vision-language model with two sources of text context: the leaf disease criteria in `docs/diagnostic_protocol.txt` and extractable text from `knowledge/WildRice_diseases_CCM_v2_compressed.pdf`. The PDF illustrations are available in the app viewer but are **not** sent to the model as reference images. Neither model was fine-tuned on this wild rice collection.
-
-The model returns a proposed category, observed visual cues, possible alternatives, and a short explanation. It may select one of the listed leaf conditions, **Healthy**, or **Unknown / Other** when the image does not support a disease-specific choice. The app checks that the category is allowed, places the proposed result in **Primary Diagnosis**, and adds guide references from its source mapping. Those references document the category criteria; they do not confirm that the photographed leaf has that disease. If the model returns an invalid response or cannot run, the app shows an error instead of silently substituting a rule-based diagnosis.
-
-The model's output is a **tentative visual differential**, not a pathogen identification or a calibrated probability. In [initial GPU runs](reports/vision_sample_runs.md), 3B abstained on RR1 and both RR8 leaves; 7B gave RR1 a tentative Spot Blotch label. Without expert-confirmed labels, these differences cannot show which model is more accurate.
-
-### How vision-model severity is determined
-
-The vision model **does not calculate the displayed severity percentage**. Before the model examines each crop, `aiwr/diagnostic.py` creates the same color-change mask used by the rule-based method. The app divides its marked pixels by detected leaf pixels and applies the shared severity scale below. Therefore, changing from 3B to 7B can change the diagnosis while leaving the severity number unchanged. Changing the diagnosis during review also leaves that number unchanged.
-
-### Run the vision-model app on a GPU node
-
-On MSI, the `DeepLearningHCL` environment provides GPU PyTorch. The project `.venv-hcl` overlay supplies compatible Transformers and Streamlit packages while keeping the conda environment unchanged:
-
-```bash
-cd /projects/standard/support/shared/lamx0031/Codex/aiwr
-PYTHONNOUSERSITE=1 /users/9/lamx0031/.conda/envs/DeepLearningHCL/bin/python -m venv --system-site-packages .venv-hcl
-PYTHONNOUSERSITE=1 .venv-hcl/bin/python -m pip install -r requirements-vision-hcl.txt
-env -u LD_LIBRARY_PATH -u CUDA_HOME -u CUDA_PATH \
-  PYTHONNOUSERSITE=1 USE_TF=0 \
-  .venv-hcl/bin/python -m streamlit run app.py
-```
-
-The final launch command was verified on a GPU node. It prevents CUDA paths inherited from a shell or OnDemand session from overriding the libraries used by the conda PyTorch build. No separate CUDA or cuDNN module is required. A separate clean GPU environment can instead use `requirements-vision.txt`, which includes PyTorch. The first run of each model downloads its weights into `.model_cache/`. Both 3B and 7B loaded together on an A40 using about 22.6 GiB of allocated GPU memory; restart Streamlit to release loaded model memory. A Transformers warning about an ignored `temperature` generation flag is nonfatal.
-
-## Shared severity method
-
-For **each detected leaf**, the app calculates:
+Both methods use the same color-change mask made by `aiwr/diagnostic.py`. The mask marks candidate brown, yellowed, and unusually dark pixels inside the detected leaf, then removes tiny groups and edge pixels. The vision model does not calculate the displayed severity percentage.
 
 **Visible color-change area (%) = 100 × marked pixels inside the leaf mask ÷ all visible pixels inside the leaf mask.**
 
-It applies the categories in [Part 2 of the diagnostic protocol](docs/diagnostic_protocol.txt):
-
-| Measured area | Severity category |
+| Measured area | Severity class |
 | --- | --- |
 | 0% | Healthy |
 | More than 0% to 10% | Low |
@@ -129,26 +115,50 @@ It applies the categories in [Part 2 of the diagnostic protocol](docs/diagnostic
 | More than 30% to 60% | High |
 | More than 60% | Severe |
 
-For example, 150 marked pixels among 1,000 visible leaf pixels give **15% — Moderate**. This is an area measurement, **not a diagnosis confidence score**. The percentage includes all color changes detected by the heuristic mask, regardless of the selected diagnosis. Shadows, senescence, injury, and other stresses may be counted; subtle lesions may be missed. “Healthy” in the severity column means the mask measured 0%, not that the leaf is independently confirmed healthy. Neither the leaf masks nor symptom masks have been validated against expert-reviewed boundaries.
+For example, 150 marked pixels among 1,000 leaf pixels give **15% — Moderate**. This is an area estimate, not diagnosis confidence or confirmed disease coverage. Shadows, age, injury, and other stresses can affect it; subtle lesions can be missed. “Healthy” in this column means the mask measured 0%, not that a reviewer confirmed a healthy leaf. See [Part 2 of the diagnostic protocol](docs/diagnostic_protocol.txt).
 
-## Review, exports, and evaluation
+## Vision diagnosis for a folder
 
-The reviewer-observed cue menu compares human-selected features with guide-based differentials. The reviewer-entered label menu can override the displayed diagnosis. Saving requires a reviewer ID, a label, and an explicit confirmation status: **Expert visual review**, **Laboratory confirmed**, or **Needs adjudication**. The confirmation status records the reviewer's stated evidence level; selecting it does not independently verify the diagnosis. The app also accepts an optional specimen or collection ID and reviewer notes.
+On a GPU node, process TIFF, JPEG, and PNG files recursively with the same vision workflow as the app:
 
-Each click on **Save reviewed leaf** creates an immutable JSON review event in `reviews/events/`. The event links to the original uploaded image (stored once by SHA-256), a masked leaf crop, and a leaf mask. It also stores the initial automatic diagnosis, method, severity estimate, reviewer label and cues, reviewer ID, and timestamp. Later corrections create another event, preserving review history. `reviews/` is excluded from Git and should be backed up as research data.
+```bash
+env -u LD_LIBRARY_PATH -u CUDA_HOME -u CUDA_PATH \
+  PYTHONNOUSERSITE=1 USE_TF=0 \
+  .venv-hcl/bin/python -m aiwr.vision_batch \
+  samples_images/99_2024_Surv_bp_Waskish_August \
+  --output-dir outputs/vision_batch --resume
+```
 
-Launch the app and save reviews first; no command is needed before reviewing. To create or refresh the training manifest after reviews have been saved, run this from the project directory:
+The default model is 3B. Add `--model Qwen/Qwen2.5-VL-7B-Instruct` for 7B or `--max-side 2400` for higher analysis resolution. Individual files can also be given. The selected model is loaded once per process; detected leaves are diagnosed sequentially. This command processes a folder, but does not yet combine leaf crops into simultaneous GPU inference batches.
+
+Each image gets a JSON record under `outputs/vision_batch/records/`. The folder also receives `results.json` and per-leaf `leaves.csv`. A failed or invalid image is recorded, and the command exits with a nonzero status. `--resume` reuses a successful record only when its source checksum, model, and analysis dimension still match; error records are retried. These automatic results are unreviewed and do not enter `reviews/` automatically.
+
+The batch command was exercised with a real RR1 TIFF on an L40S GPU and resumed its saved result on a second run. The complete sample collection has not been evaluated for diagnostic accuracy.
+
+## Save reviews and build a dataset
+
+In the Streamlit app, **Save reviewed leaf** writes a record immediately after a reviewer enters an ID and label and selects **Expert visual review**, **Laboratory confirmed**, or **Needs adjudication**. The status records the reviewer's stated evidence level; choosing it does not independently verify a diagnosis. A specimen or collection ID and notes can also be entered.
+
+Each save creates an immutable JSON event in `reviews/events/`, plus a masked leaf crop and leaf mask. The original source image is stored once by SHA-256 checksum. Events retain the automatic diagnosis, method, severity estimate, reviewer observations, reviewer label, ID, and timestamp. Corrections create new events, preserving the history. `reviews/` is excluded from Git and should be backed up as research data.
+
+After reviews have been saved, create or refresh the fine-tuning manifest with:
 
 ```bash
 .venv/bin/python -m aiwr.review_store
 ```
 
-This writes `reviews/dataset.jsonl` with image paths and labels. It uses the latest review for each source image and leaf ID, and includes only leaf-tissue reviews marked expert visual or laboratory confirmed. Reviews marked **Needs adjudication**, **Unknown / Other**, and stem or panicle reviews remain in the audit store but are excluded from this leaf-classification manifest. Group train/validation/test splits by specimen or collection ID when available; leaves from the same image must stay in the same split. The manifest is a curated input for a later fine-tuning script, not a fine-tuned model or a measured accuracy result. CSV and JSON downloads retain **Auto Candidate** and **Diagnostic Method** for evaluating automatic suggestions separately from reviewer labels.
+This writes `reviews/dataset.jsonl`. It uses the latest review for each source image and leaf ID. Only leaf-tissue reviews marked expert visual or laboratory confirmed are included. **Needs adjudication**, **Unknown / Other**, and stem or panicle records remain in the review store but are excluded from this leaf-classification manifest. Use specimen or collection IDs to keep related images together when making train, validation, and test splits. The manifest is an input for a future fine-tuning workflow; the repository does not yet contain a fine-tuning command.
 
-The sample images do not include independent expert-confirmed per-leaf diagnoses or reviewed lesion masks. **Diagnostic accuracy and severity error have not been measured; the 90% accuracy target remains unverified.** To evaluate automatic diagnoses, copy `examples/labels_template.csv`, enter expert- or laboratory-confirmed labels, and run:
+## Validation status
+
+The sample images do not have independent expert-confirmed per-leaf labels or reviewed lesion masks. **Diagnostic accuracy and severity error have not been measured; the 90% accuracy target remains unverified.** To compare automatic results against confirmed labels, copy `examples/labels_template.csv`, enter expert- or laboratory-confirmed labels, and run:
 
 ```bash
 .venv/bin/python -m aiwr.evaluate outputs/rr8/leaves.csv confirmed_labels.csv
 ```
 
-The evaluator counts abstentions and missing predictions in overall accuracy and reports coverage separately. Severity accuracy requires expert-reviewed symptom masks or independent severity measurements. See [the pipeline plan](docs/plan.md) for the proposed validation and model-development work.
+The evaluator counts abstentions and missing predictions in overall accuracy and reports coverage separately. Severity validation needs expert-reviewed symptom masks or independent measurements. Automated checks can be run with `.venv/bin/python -m pytest -q tests`.
+
+## AI co-authorship
+
+This repository was developed by a human researcher with assistance from AI coding tools. Generated code and diagnostic output require review and validation before research or operational use.

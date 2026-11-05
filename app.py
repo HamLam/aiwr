@@ -61,10 +61,10 @@ def markdown_table(rows):
     return "\n".join(lines)
 
 
-st.set_page_config(page_title="Wild Rice Disease Review", layout="wide")
-st.title("Wild Rice Disease Review")
-st.caption("Choose rule-based or local vision-model diagnosis. Both are unvalidated visual differentials.")
-st.info("Every automated finding requires expert review. A photograph cannot establish species or pathogen identity by itself. The percentage describes visible color change, not confirmed disease area.")
+st.set_page_config(page_title="Wild Rice Disease Review and Diagnostic", layout="wide")
+st.title("Wild Rice Disease Review and Diagnostic")
+st.caption("Choose rule-based or local vision-model diagnosis.")
+## st.info("Every automated finding requires expert review. A photograph cannot establish species or pathogen identity by itself. The percentage describes visible color change, not confirmed disease area.")
 
 diagnostic_method = st.radio(
     "Diagnostic method", ["Rule-based", "Vision model (local GPU)"], horizontal=True)
